@@ -6,6 +6,11 @@ on:
     paths:
       - 'tmp/capture-studios.js'
       - '.github/workflows/capture-studios.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tmp/capture-studios.js'
+      - '.github/workflows/capture-studios.yml'
   workflow_dispatch:
 
 permissions:
