@@ -1,4 +1,4 @@
-// trigger capture workflow
+// trigger pull-request capture workflow
 const { chromium } = require('playwright');
 const sharp = require('sharp');
 const fs = require('fs');
