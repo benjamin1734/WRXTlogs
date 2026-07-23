@@ -1,3 +1,4 @@
+// trigger capture workflow
 const { chromium } = require('playwright');
 const sharp = require('sharp');
 const fs = require('fs');
@@ -90,7 +91,6 @@ async function compressUnder1MB(inputPng, outputJpg) {
     await collectLinks(page, p, routes);
   }
 
-  // Follow discovered listing/category pages once more to find detail pages.
   for (const p of [...routes].filter(x => x.startsWith('/magaza') || x === '/haberler' || x.startsWith('/yardim-merkezi'))) {
     await collectLinks(page, p, routes);
   }
