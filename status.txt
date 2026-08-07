@@ -1,0 +1,20 @@
+Shardguard Gate10 Android build
+commit=66ae837b2dabc8ba802930b05823f8c56ddd3127
+android_home=/usr/local/lib/android/sdk
+java_home=/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.19-10/x64
+phase=verify
+status=40
+result=FAIL
+total 56
+drwxr-xr-x  2 runner runner  4096 Aug  7 17:30 .
+drwxrwxrwt 17 root   root   12288 Aug  7 17:29 ..
+-rw-r--r--  1 runner runner    56 Aug  7 17:29 apksigner-path.txt
+-rw-r--r--  1 runner runner  1391 Aug  7 17:30 export.log
+-rw-r--r--  1 runner runner   476 Aug  7 17:29 godot-download.log
+-rw-r--r--  1 runner runner    32 Aug  7 17:29 godot-version.txt
+-rw-r--r--  1 runner runner   880 Aug  7 17:30 import.log
+-rw-r--r--  1 runner runner   880 Aug  7 17:30 initial-import.log
+-rw-r--r--  1 runner runner   203 Aug  7 17:29 keytool.log
+-rw-r--r--  1 runner runner   362 Aug  7 17:30 settings.log
+-rw-r--r--  1 runner runner   226 Aug  7 17:30 status.txt
+-rw-r--r--  1 runner runner   713 Aug  7 17:29 templates-download.log
