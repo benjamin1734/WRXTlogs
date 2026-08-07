@@ -1,0 +1,164 @@
+name: Shardguard Gate10 APK Publish Probe
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build APK and capture diagnostics
+        shell: bash
+        run: |
+          set +e
+          PUB=/tmp/shardguard-publish
+          mkdir -p "$PUB"
+          STATUS=0
+          PHASE=init
+          echo "Shardguard Gate10 Android build" > "$PUB/status.txt"
+          echo "commit=$GITHUB_SHA" >> "$PUB/status.txt"
+          echo "android_home=$ANDROID_HOME" >> "$PUB/status.txt"
+          echo "java_home=$JAVA_HOME" >> "$PUB/status.txt"
+
+          PHASE=android
+          mkdir -p "$HOME/Android" "$HOME/.android"
+          ln -sfn "$ANDROID_HOME" "$HOME/Android/Sdk"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -v -keystore "$HOME/.android/debug.keystore" \
+              -storepass android -alias androiddebugkey -keypass android \
+              -dname "CN=Android Debug,O=Warext Studios,C=TR" \
+              -keyalg RSA -keysize 2048 -validity 10000 >"$PUB/keytool.log" 2>&1
+          fi
+          find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name apksigner | sort -V | tail -1 > "$PUB/apksigner-path.txt"
+
+          PHASE=godot_download
+          curl -fL --retry 3 -o /tmp/godot.zip \
+            https://github.com/godotengine/godot/releases/download/4.7.1-stable/Godot_v4.7.1-stable_linux.x86_64.zip \
+            >"$PUB/godot-download.log" 2>&1
+          if [ $? -ne 0 ]; then STATUS=10; fi
+          if [ $STATUS -eq 0 ]; then
+            mkdir -p /tmp/godot
+            unzip -q /tmp/godot.zip -d /tmp/godot >>"$PUB/godot-download.log" 2>&1
+            GODOT_BIN="$(find /tmp/godot -maxdepth 2 -type f -name 'Godot_v4.7.1-stable_linux.x86_64' | head -1)"
+            if [ -z "$GODOT_BIN" ]; then STATUS=11; else chmod +x "$GODOT_BIN"; sudo ln -sf "$GODOT_BIN" /usr/local/bin/godot; fi
+          fi
+          if [ $STATUS -eq 0 ]; then godot --version > "$PUB/godot-version.txt" 2>&1 || STATUS=12; fi
+
+          PHASE=templates
+          if [ $STATUS -eq 0 ]; then
+            curl -fL --retry 3 -o /tmp/templates.tpz \
+              https://github.com/godotengine/godot/releases/download/4.7.1-stable/Godot_v4.7.1-stable_export_templates.tpz \
+              >"$PUB/templates-download.log" 2>&1 || STATUS=20
+          fi
+          if [ $STATUS -eq 0 ]; then
+            rm -rf /tmp/templates; mkdir -p /tmp/templates
+            unzip -q /tmp/templates.tpz -d /tmp/templates >>"$PUB/templates-download.log" 2>&1 || STATUS=21
+            TPL="$(find /tmp/templates -type f -name android_debug.apk | head -1)"
+            if [ -z "$TPL" ]; then STATUS=22; else
+              TPL_DIR="$(dirname "$TPL")"
+              DEST="$HOME/.local/share/godot/export_templates/4.7.1.stable"
+              mkdir -p "$DEST"; cp -a "$TPL_DIR"/. "$DEST"/
+            fi
+          fi
+
+          PHASE=settings
+          if [ $STATUS -eq 0 ]; then
+            godot --headless --editor --path .shardguard-build/compat --quit-after 2 >"$PUB/initial-import.log" 2>&1
+            mkdir -p "$HOME/.config/godot"
+            SETTINGS="$(find "$HOME/.config/godot" -maxdepth 1 -type f -name 'editor_settings-4*.tres' | head -1)"
+            if [ -n "$SETTINGS" ]; then
+              export SETTINGS
+              python3 - <<'PY' >>"$PUB/settings.log" 2>&1
+          import os, pathlib
+          p=pathlib.Path(os.environ['SETTINGS'])
+          s=p.read_text()
+          values={
+            'export/android/android_sdk_path': os.environ.get('ANDROID_HOME',''),
+            'export/android/java_sdk_path': os.environ.get('JAVA_HOME',''),
+            'export/android/debug_keystore': str(pathlib.Path.home()/'.android/debug.keystore'),
+            'export/android/debug_keystore_user': 'androiddebugkey',
+            'export/android/debug_keystore_pass': 'android',
+          }
+          for k,v in values.items():
+              line=f'{k} = "{v}"'
+              if k in s:
+                  import re
+                  s=re.sub(r'^'+re.escape(k)+r'\s*=.*$', line, s, flags=re.M)
+              else:
+                  s += '\n'+line
+          p.write_text(s)
+          print(p)
+          print('\n'.join(f'{k}={v}' for k,v in values.items()))
+          PY
+            fi
+          fi
+
+          PHASE=import
+          if [ $STATUS -eq 0 ]; then
+            godot --headless --editor --path .shardguard-build/compat --quit-after 5 >"$PUB/import.log" 2>&1
+            RC=$?; if [ $RC -ne 0 ]; then STATUS=30; fi
+          fi
+
+          PHASE=export
+          if [ $STATUS -eq 0 ]; then
+            mkdir -p "$GITHUB_WORKSPACE/out"
+            godot --headless --path .shardguard-build/compat --export-debug "Android Debug" \
+              "$GITHUB_WORKSPACE/out/Shardguard_FracturedSkies_v2.0.0_Android_Debug.apk" \
+              >"$PUB/export.log" 2>&1
+            RC=$?; if [ $RC -ne 0 ]; then STATUS=40; fi
+          fi
+
+          PHASE=verify
+          APK="$GITHUB_WORKSPACE/out/Shardguard_FracturedSkies_v2.0.0_Android_Debug.apk"
+          if [ $STATUS -eq 0 ]; then
+            if [ ! -s "$APK" ]; then STATUS=41; else
+              unzip -t "$APK" >"$PUB/unzip-test.txt" 2>&1 || STATUS=42
+            fi
+          fi
+          if [ $STATUS -eq 0 ]; then
+            unzip -l "$APK" > "$PUB/apk-contents.txt"
+            grep -q 'AndroidManifest.xml' "$PUB/apk-contents.txt" || STATUS=43
+            grep -q 'classes.dex' "$PUB/apk-contents.txt" || STATUS=44
+            grep -q 'lib/arm64-v8a/' "$PUB/apk-contents.txt" || STATUS=45
+          fi
+          if [ $STATUS -eq 0 ]; then
+            APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+            "$APKSIGNER" verify --verbose --print-certs "$APK" > "$PUB/apksigner-verify.txt" 2>&1 || STATUS=46
+          fi
+          if [ -s "$APK" ]; then
+            cp "$APK" "$PUB/Shardguard_FracturedSkies_v2.0.0_Android_Debug.apk"
+            sha256sum "$APK" > "$PUB/Shardguard_FracturedSkies_v2.0.0_Android_Debug.apk.sha256"
+            stat -c 'apk_bytes=%s' "$APK" >> "$PUB/status.txt"
+          fi
+          echo "phase=$PHASE" >> "$PUB/status.txt"
+          echo "status=$STATUS" >> "$PUB/status.txt"
+          if [ $STATUS -eq 0 ]; then echo "result=PASS" >> "$PUB/status.txt"; else echo "result=FAIL" >> "$PUB/status.txt"; fi
+          ls -la "$PUB" >> "$PUB/status.txt"
+          exit 0
+
+      - name: Publish APK or diagnostics to temporary output branch
+        shell: bash
+        run: |
+          set -euxo pipefail
+          PUB=/tmp/shardguard-publish
+          cd "$GITHUB_WORKSPACE"
+          git config user.name "Shardguard CI"
+          git config user.email "actions@users.noreply.github.com"
+          git checkout --orphan shardguard-apk-output-20260807
+          git rm -rf .
+          cp -a "$PUB"/. .
+          git add -A
+          git commit -m "Shardguard APK CI output [skip ci]"
+          git push --force origin HEAD:refs/heads/shardguard-apk-output-20260807
